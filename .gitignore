@@ -52,9 +52,6 @@ audios/
 annonator/audios/
 benchmark/wav/
 
-# Annotator runtime data
-annonator/annotations.json
-
 # Benchmark results
 benchmark/vad4j_results.txt
 benchmark/silero_x86_results.txt
