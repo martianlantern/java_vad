@@ -48,8 +48,6 @@ __pycache__/
 .uv/
 
 # Audio files (large, not tracked)
-audios/
-annonator/audios/
 benchmark/wav/
 
 # Benchmark results
