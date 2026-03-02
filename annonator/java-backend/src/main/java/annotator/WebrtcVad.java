@@ -1,6 +1,5 @@
 package annotator;
 
-import com.orctom.vad4j.VAD;
 import java.util.*;
 
 public class WebrtcVad {
@@ -12,7 +11,7 @@ public class WebrtcVad {
             synchronized (WebrtcVad.class) {
                 if (available == null) {
                     try {
-                        new VAD().close();
+                        new Vad4j().close();
                         available = true;
                     } catch (Throwable t) {
                         System.err.println("vad4j (WebRTC VAD) not available: " + t.getMessage());
@@ -30,7 +29,7 @@ public class WebrtcVad {
     public static List<Segment> run(byte[] pcm16, int sampleRate, int frameDurMs,
                                      float threshold, int padMs) {
         if (!isAvailable()) return List.of();
-        try (VAD vad = new VAD()) {
+        try (Vad4j vad = new Vad4j()) {
             int frameBytes = sampleRate * 2 * frameDurMs / 1000;
             double frameSec = frameDurMs / 1000.0;
             int padFrames = padMs / frameDurMs;
