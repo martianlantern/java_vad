@@ -50,6 +50,7 @@ public class Server {
         System.out.printf("Base path:  %s%n", BASE_PATH.isEmpty() ? "/" : BASE_PATH);
 
         sileroVad = new SileroVad(MODEL_PATH);
+        System.out.printf("vad4j (WebRTC): %s%n", WebrtcVad.isAvailable() ? "available" : "unavailable (native lib arch mismatch)");
 
         HttpServer server = HttpServer.create(new InetSocketAddress("0.0.0.0", port), 0);
         server.setExecutor(Executors.newFixedThreadPool(4));
@@ -197,17 +198,34 @@ public class Server {
         int minSilenceMs = Integer.parseInt(params.getOrDefault("silero_min_silence_ms", "100"));
         int speechPadMs = Integer.parseInt(params.getOrDefault("silero_speech_pad_ms", "30"));
 
-        float[] audio = loadAudioAsFloat(file, 16000);
+        int webrtcSr = Integer.parseInt(params.getOrDefault("webrtc_sample_rate", "8000"));
+        int webrtcFrameMs = Integer.parseInt(params.getOrDefault("webrtc_frame_dur_ms", "20"));
+        float webrtcThr = Float.parseFloat(params.getOrDefault("webrtc_threshold", "0.6"));
+        int webrtcPadMs = Integer.parseInt(params.getOrDefault("webrtc_pad_ms", "300"));
+
+        float[] audio16k = loadAudioAsFloat(file, 16000);
         List<SileroVad.Segment> sileroSegs;
         synchronized (sileroVad) {
-            sileroSegs = sileroVad.getSpeechTimestamps(audio, sileroThr, minSpeechMs, minSilenceMs, speechPadMs);
+            sileroSegs = sileroVad.getSpeechTimestamps(audio16k, sileroThr, minSpeechMs, minSilenceMs, speechPadMs);
         }
 
         List<Map<String, Double>> sileroList = sileroSegs.stream()
                 .map(s -> Map.of("start", s.start(), "end", s.end()))
                 .toList();
 
-        sendJson(ex, 200, Map.of("webrtc", List.of(), "silero", sileroList));
+        List<Map<String, Double>> webrtcList;
+        try {
+            byte[] pcmWebrtc = loadAudioAsPcm(file, webrtcSr);
+            List<WebrtcVad.Segment> webrtcSegs = WebrtcVad.run(pcmWebrtc, webrtcSr, webrtcFrameMs, webrtcThr, webrtcPadMs);
+            webrtcList = webrtcSegs.stream()
+                    .map(s -> Map.of("start", s.start(), "end", s.end()))
+                    .toList();
+        } catch (Exception e) {
+            System.err.println("WebRTC VAD (vad4j) failed: " + e.getMessage());
+            webrtcList = List.of();
+        }
+
+        sendJson(ex, 200, Map.of("webrtc", webrtcList, "silero", sileroList));
     }
 
     private static void handleAnnotations(HttpExchange ex, String filepath) throws IOException {
@@ -230,6 +248,30 @@ public class Server {
             return GSON.fromJson(Files.readString(ANNOTATIONS_FILE), Map.class);
         }
         return new HashMap<>();
+    }
+
+    private static byte[] loadAudioAsPcm(Path file, int targetSr) throws Exception {
+        String ext = getExt(file.toString());
+        if (ext.equals("mp3") || ext.equals("ogg") || ext.equals("flac")) {
+            ProcessBuilder pb = new ProcessBuilder(
+                    "ffmpeg", "-i", file.toString(), "-f", "s16le", "-ar", String.valueOf(targetSr),
+                    "-ac", "1", "-acodec", "pcm_s16le", "-");
+            pb.redirectErrorStream(false);
+            Process proc = pb.start();
+            byte[] pcm = proc.getInputStream().readAllBytes();
+            proc.waitFor();
+            return pcm;
+        } else {
+            AudioInputStream ais = AudioSystem.getAudioInputStream(file.toFile());
+            AudioFormat srcFmt = ais.getFormat();
+            if (srcFmt.getSampleRate() != targetSr || srcFmt.getChannels() != 1) {
+                AudioFormat targetFmt = new AudioFormat(targetSr, 16, 1, true, false);
+                ais = AudioSystem.getAudioInputStream(targetFmt, ais);
+            }
+            byte[] pcm = ais.readAllBytes();
+            ais.close();
+            return pcm;
+        }
     }
 
     private static float[] loadAudioAsFloat(Path file, int targetSr) throws Exception {
