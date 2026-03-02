@@ -19,13 +19,7 @@ if [ "$BACKEND" = "java" ]; then
         echo "ERROR: silero_vad.onnx not found. Run: git submodule update --init"
         exit 1
     fi
-    UNAME=$(uname -s)
-    if [ "$UNAME" = "Darwin" ]; then
-        LIB_DIR="../vad4j/src/main/resources/darwin"
-    else
-        LIB_DIR="../vad4j/src/main/resources/linux-x86-64"
-    fi
-    exec java -Djna.library.path="$LIB_DIR" -jar "$JAR" "$PORT" "." "$MODEL"
+    exec java -jar "$JAR" "$PORT" "." "$MODEL"
 else
     exec ./server.py --port="$PORT"
 fi

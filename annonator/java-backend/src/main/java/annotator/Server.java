@@ -50,7 +50,7 @@ public class Server {
         System.out.printf("Base path:  %s%n", BASE_PATH.isEmpty() ? "/" : BASE_PATH);
 
         sileroVad = new SileroVad(MODEL_PATH);
-        System.out.printf("vad4j (WebRTC): %s%n", WebrtcVad.isAvailable() ? "available" : "unavailable (native lib arch mismatch)");
+        System.out.printf("WebRTC VAD:  %s%n", WebrtcVad.isAvailable() ? "available" : "unavailable");
 
         HttpServer server = HttpServer.create(new InetSocketAddress("0.0.0.0", port), 0);
         server.setExecutor(Executors.newFixedThreadPool(4));
@@ -200,6 +200,7 @@ public class Server {
 
         int webrtcSr = Integer.parseInt(params.getOrDefault("webrtc_sample_rate", "8000"));
         int webrtcFrameMs = Integer.parseInt(params.getOrDefault("webrtc_frame_dur_ms", "20"));
+        int webrtcMode = Integer.parseInt(params.getOrDefault("webrtc_vad_mode", "0"));
         float webrtcThr = Float.parseFloat(params.getOrDefault("webrtc_threshold", "0.6"));
         int webrtcPadMs = Integer.parseInt(params.getOrDefault("webrtc_pad_ms", "300"));
 
@@ -216,12 +217,12 @@ public class Server {
         List<Map<String, Double>> webrtcList;
         try {
             byte[] pcmWebrtc = loadAudioAsPcm(file, webrtcSr);
-            List<WebrtcVad.Segment> webrtcSegs = WebrtcVad.run(pcmWebrtc, webrtcSr, webrtcFrameMs, webrtcThr, webrtcPadMs);
+            List<WebrtcVad.Segment> webrtcSegs = WebrtcVad.run(pcmWebrtc, webrtcSr, webrtcFrameMs, webrtcMode, webrtcThr, webrtcPadMs);
             webrtcList = webrtcSegs.stream()
                     .map(s -> Map.of("start", s.start(), "end", s.end()))
                     .toList();
         } catch (Exception e) {
-            System.err.println("WebRTC VAD (vad4j) failed: " + e.getMessage());
+            System.err.println("WebRTC VAD failed: " + e.getMessage());
             webrtcList = List.of();
         }
 

@@ -1,5 +1,6 @@
 package annotator;
 
+import io.github.givimad.libfvadjni.VoiceActivityDetector;
 import java.util.*;
 
 public class WebrtcVad {
@@ -11,11 +12,12 @@ public class WebrtcVad {
             synchronized (WebrtcVad.class) {
                 if (available == null) {
                     try {
-                        new Vad4j().close();
+                        VoiceActivityDetector.loadLibrary();
+                        VoiceActivityDetector test = VoiceActivityDetector.newInstance();
+                        test.close();
                         available = true;
                     } catch (Throwable t) {
-                        System.err.println("vad4j (WebRTC VAD) not available: " + t.getMessage());
-                        System.err.println("WebRTC VAD will be disabled. Silero VAD will still work.");
+                        System.err.println("WebRTC VAD (libfvad) not available: " + t.getMessage());
                         available = false;
                     }
                 }
@@ -27,60 +29,66 @@ public class WebrtcVad {
     public record Segment(double start, double end) {}
 
     public static List<Segment> run(byte[] pcm16, int sampleRate, int frameDurMs,
-                                     float threshold, int padMs) {
+                                     int vadMode, float threshold, int padMs) {
         if (!isAvailable()) return List.of();
-        try (Vad4j vad = new Vad4j()) {
-            int frameBytes = sampleRate * 2 * frameDurMs / 1000;
+        try {
+            VoiceActivityDetector vad = VoiceActivityDetector.newInstance();
+            vad.setMode(VoiceActivityDetector.Mode.values()[vadMode]);
+            vad.setSampleRate(VoiceActivityDetector.SampleRate.fromValue(sampleRate));
+
+            int frameSamples = sampleRate * frameDurMs / 1000;
+            int frameBytes = frameSamples * 2;
             double frameSec = frameDurMs / 1000.0;
             int padFrames = padMs / frameDurMs;
 
-            List<boolean[]> frameData = new ArrayList<>();
-            List<double[]> frameTimes = new ArrayList<>();
-
+            List<Boolean> speeches = new ArrayList<>();
+            List<double[]> times = new ArrayList<>();
             double ts = 0.0;
+
             for (int off = 0; off + frameBytes <= pcm16.length; off += frameBytes) {
-                byte[] chunk = new byte[frameBytes];
-                System.arraycopy(pcm16, off, chunk, 0, frameBytes);
-                boolean speech = vad.isSpeech(chunk);
-                frameData.add(new boolean[]{speech});
-                frameTimes.add(new double[]{ts, frameSec});
+                short[] frame = new short[frameSamples];
+                for (int i = 0; i < frameSamples; i++)
+                    frame[i] = (short) ((pcm16[off + i * 2] & 0xff) | (pcm16[off + i * 2 + 1] << 8));
+                boolean speech = vad.process(frame);
+                speeches.add(speech);
+                times.add(new double[]{ts, frameSec});
                 ts += frameSec;
             }
-
-            return collect(frameData, frameTimes, threshold, padFrames);
+            vad.close();
+            return collect(speeches, times, threshold, padFrames);
+        } catch (Exception e) {
+            System.err.println("WebRTC VAD error: " + e.getMessage());
+            return List.of();
         }
     }
 
-    private static List<Segment> collect(List<boolean[]> frames, List<double[]> times,
+    private static List<Segment> collect(List<Boolean> speeches, List<double[]> times,
                                           float threshold, int padFrames) {
         List<Segment> result = new ArrayList<>();
         Deque<Integer> ring = new ArrayDeque<>();
         boolean triggered = false;
         double start = 0;
 
-        for (int i = 0; i < frames.size(); i++) {
-            boolean speech = frames.get(i)[0];
+        for (int i = 0; i < speeches.size(); i++) {
+            boolean speech = speeches.get(i);
 
             if (!triggered) {
                 ring.addLast(speech ? 1 : 0);
                 if (ring.size() > padFrames) ring.removeFirst();
-
                 if (ring.size() == padFrames) {
-                    int speechCount = ring.stream().mapToInt(Integer::intValue).sum();
-                    if (speechCount > threshold * padFrames) {
+                    int cnt = ring.stream().mapToInt(Integer::intValue).sum();
+                    if (cnt > threshold * padFrames) {
                         triggered = true;
-                        int oldest = i - ring.size() + 1;
-                        start = times.get(Math.max(0, oldest))[0];
+                        start = times.get(Math.max(0, i - ring.size() + 1))[0];
                         ring.clear();
                     }
                 }
             } else {
                 ring.addLast(speech ? 0 : 1);
                 if (ring.size() > padFrames) ring.removeFirst();
-
                 if (ring.size() == padFrames) {
-                    int silenceCount = ring.stream().mapToInt(Integer::intValue).sum();
-                    if (silenceCount > threshold * padFrames) {
+                    int cnt = ring.stream().mapToInt(Integer::intValue).sum();
+                    if (cnt > threshold * padFrames) {
                         triggered = false;
                         double end = times.get(i)[0] + times.get(i)[1];
                         result.add(new Segment(
@@ -99,7 +107,6 @@ public class WebrtcVad {
                     Math.round(start * 1000.0) / 1000.0,
                     Math.round(end * 1000.0) / 1000.0));
         }
-
         return result;
     }
 }
