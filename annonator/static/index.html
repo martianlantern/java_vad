@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VAD Annotator</title>
+<script>window.BASE_PATH="__BASE_PATH__";</script>
+<link rel="stylesheet" href="__BASE_PATH__/static/style.css">
+</head>
+<body>
+<div class="app">
+  <header class="app-header">
+    <h1>VAD Annotator</h1>
+    <div class="controls">
+      <select id="audio-select"><option value="">Select audio...</option></select>
+      <button id="load-btn" disabled>Load & Run VADs</button>
+      <span id="status"></span>
+    </div>
+  </header>
+
+  <main class="app-main" id="main-content" style="display:none">
+    <div class="params-panel">
+      <details open>
+        <summary>VAD Hyperparameters</summary>
+        <div class="params-grid">
+          <fieldset class="param-group">
+            <legend>WebRTC</legend>
+            <label>Mode <select id="p-webrtc-mode"><option value="0">0 (least aggressive)</option><option value="1">1</option><option value="2">2</option><option value="3" selected>3 (most aggressive)</option></select></label>
+            <label>Threshold <input type="number" id="p-webrtc-thr" value="0.6" min="0" max="1" step="0.05"></label>
+            <label>Frame (ms) <select id="p-webrtc-frame"><option value="10">10</option><option value="20" selected>20</option><option value="30">30</option></select></label>
+            <label>Pad (ms) <input type="number" id="p-webrtc-pad" value="300" min="0" max="2000" step="50"></label>
+            <label>Sample rate <select id="p-webrtc-sr"><option value="8000" selected>8000</option><option value="16000">16000</option><option value="32000">32000</option><option value="48000">48000</option></select></label>
+          </fieldset>
+          <fieldset class="param-group">
+            <legend>Silero</legend>
+            <label>Threshold <input type="number" id="p-silero-thr" value="0.5" min="0" max="1" step="0.05"></label>
+            <label>Min speech (ms) <input type="number" id="p-silero-minspeech" value="250" min="0" max="5000" step="50"></label>
+            <label>Min silence (ms) <input type="number" id="p-silero-minsilence" value="100" min="0" max="2000" step="50"></label>
+            <label>Speech pad (ms) <input type="number" id="p-silero-pad" value="30" min="0" max="500" step="10"></label>
+          </fieldset>
+          <div class="param-actions">
+            <button id="rerun-btn" class="primary">Re-run VADs</button>
+            <span id="rerun-status"></span>
+          </div>
+        </div>
+      </details>
+    </div>
+
+    <div class="audio-player-bar">
+      <button id="play-btn" class="play-btn">&#9654;</button>
+      <span id="time-display">0:00 / 0:00</span>
+      <div class="seek-bar-wrap">
+        <input type="range" id="seek-bar" min="0" max="1000" value="0" step="1">
+      </div>
+    </div>
+
+    <div class="timelines-container">
+      <div class="timeline-row">
+        <div class="timeline-label">
+          <span>ground truth</span>
+          <span class="label-hint">click to annotate</span>
+        </div>
+        <div class="timeline-scroll" id="gt-scroll">
+          <div class="timeline-track" id="gt-track">
+            <div class="playhead" id="gt-playhead"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="timeline-row">
+        <div class="timeline-label"><span>webrtc</span></div>
+        <div class="timeline-scroll" id="webrtc-scroll">
+          <div class="timeline-track" id="webrtc-track">
+            <div class="playhead" id="webrtc-playhead"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="timeline-row">
+        <div class="timeline-label"><span>silero</span></div>
+        <div class="timeline-scroll" id="silero-scroll">
+          <div class="timeline-track" id="silero-track">
+            <div class="playhead" id="silero-playhead"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="annotation-tools">
+      <button id="add-seg-btn" class="tool-btn">+ Add Segment</button>
+      <button id="clear-gt-btn" class="tool-btn danger">Clear GT</button>
+      <button id="save-gt-btn" class="tool-btn primary">Save GT</button>
+      <span id="anno-status"></span>
+    </div>
+
+    <div class="metrics-panel" id="metrics-panel">
+      <h2>metrics</h2>
+      <div class="metrics-grid" id="metrics-grid"></div>
+    </div>
+  </main>
+</div>
+<audio id="audio-el" preload="auto"></audio>
+<script src="__BASE_PATH__/static/app.js"></script>
+</body>
+</html>
