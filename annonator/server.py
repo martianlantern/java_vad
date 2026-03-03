@@ -175,6 +175,19 @@ def run_vad(filepath):
     return jsonify({"webrtc": webrtc_segs, "silero": silero_segs})
 
 
+@bp.route("/api/upload", methods=["POST"])
+def upload_audio():
+    f = request.files.get("file")
+    cat = request.form.get("category", "uploads")
+    if not f or not f.filename:
+        return jsonify({"error": "no file"}), 400
+    dest = AUDIOS / cat
+    dest.mkdir(parents=True, exist_ok=True)
+    fpath = dest / f.filename
+    f.save(str(fpath))
+    return jsonify({"ok": True, "path": f"{cat}/{f.filename}"})
+
+
 @bp.route("/api/annotations/<path:filepath>", methods=["GET"])
 def get_annotations(filepath):
     data = load_annotations()

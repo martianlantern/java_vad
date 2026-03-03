@@ -34,6 +34,10 @@ const webrtcScroll = document.getElementById("webrtc-scroll");
 const sileroScroll = document.getElementById("silero-scroll");
 const rerunBtn = document.getElementById("rerun-btn");
 const rerunStatus = document.getElementById("rerun-status");
+const uploadInput = document.getElementById("upload-input");
+const gtStatsEl = document.getElementById("gt-stats");
+const webrtcStatsEl = document.getElementById("webrtc-stats");
+const sileroStatsEl = document.getElementById("silero-stats");
 
 function fmt(s) {
   const m = Math.floor(s / 60);
@@ -154,11 +158,12 @@ function renderSegments(track, segments, cls) {
   });
 }
 
-function renderGt() { renderSegments(gtTrack, gtSegments, "gt"); }
+function renderGt() { renderSegments(gtTrack, gtSegments, "gt"); updateStats(); }
 function renderAll() {
   renderGt();
   renderSegments(webrtcTrack, webrtcSegments, "webrtc");
   renderSegments(sileroTrack, sileroSegments, "silero");
+  updateStats();
 }
 
 function togglePlay() {
@@ -382,5 +387,44 @@ function computeMetrics() {
     card("Miss Rate", (m.missRate * 100).toFixed(1) + "%", "Speech missed by detector");
   });
 }
+
+function segStats(segs) {
+  if (!segs.length) return "";
+  const totalLen = segs.reduce((s, seg) => s + (seg.end - seg.start), 0);
+  const avg = totalLen / segs.length;
+  return `${segs.length} segs, avg ${avg.toFixed(2)}s`;
+}
+
+function updateStats() {
+  gtStatsEl.textContent = segStats(gtSegments);
+  webrtcStatsEl.textContent = segStats(webrtcSegments);
+  sileroStatsEl.textContent = segStats(sileroSegments);
+}
+
+uploadInput.addEventListener("change", async () => {
+  const files = uploadInput.files;
+  if (!files.length) return;
+  statusEl.textContent = `Uploading ${files.length} file(s)...`;
+  for (const file of files) {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("category", "uploads");
+    await fetch(`${BASE}/api/upload`, { method: "POST", body: form });
+  }
+  uploadInput.value = "";
+  const existingPaths = new Set([...audioSelect.options].map(o => o.value));
+  const res = await fetch(`${BASE}/api/audios`);
+  const allFiles = await res.json();
+  allFiles.forEach(f => {
+    if (!existingPaths.has(f.path)) {
+      const opt = document.createElement("option");
+      opt.value = f.path;
+      opt.textContent = `[${f.category}] ${f.name}`;
+      audioSelect.appendChild(opt);
+    }
+  });
+  statusEl.textContent = `Uploaded ${files.length} file(s)`;
+  setTimeout(() => statusEl.textContent = "", 3000);
+});
 
 loadAudioList();

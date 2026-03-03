@@ -89,6 +89,7 @@ public class Server {
             else if (rel.startsWith("/api/audio/")) serveAudio(ex, decode(rel.substring(11)));
             else if (rel.startsWith("/api/duration/")) getDuration(ex, decode(rel.substring(14)));
             else if (rel.startsWith("/api/vad/")) runVad(ex, decode(rel.substring(9)));
+            else if (rel.equals("/api/upload") && ex.getRequestMethod().equalsIgnoreCase("POST")) handleUpload(ex);
             else if (rel.startsWith("/api/annotations/")) handleAnnotations(ex, decode(rel.substring(17)));
             else sendText(ex, 404, "Not found");
         } catch (Exception e) {
@@ -227,6 +228,64 @@ public class Server {
         }
 
         sendJson(ex, 200, Map.of("webrtc", webrtcList, "silero", sileroList));
+    }
+
+    private static void handleUpload(HttpExchange ex) throws IOException {
+        String ct = ex.getRequestHeaders().getFirst("Content-Type");
+        if (ct == null || !ct.contains("multipart/form-data")) {
+            sendJson(ex, 400, Map.of("error", "multipart required"));
+            return;
+        }
+        String boundary = "--" + ct.split("boundary=")[1].trim();
+        byte[] body = ex.getRequestBody().readAllBytes();
+        String bodyStr = new String(body, StandardCharsets.ISO_8859_1);
+
+        String filename = null, category = "uploads";
+        byte[] fileBytes = null;
+
+        String[] parts = bodyStr.split(boundary);
+        for (String part : parts) {
+            if (part.contains("Content-Disposition")) {
+                String header = part.substring(0, part.indexOf("\r\n\r\n"));
+                String content = part.substring(part.indexOf("\r\n\r\n") + 4);
+                if (content.endsWith("\r\n")) content = content.substring(0, content.length() - 2);
+
+                if (header.contains("name=\"category\"")) {
+                    category = content.trim();
+                } else if (header.contains("name=\"file\"")) {
+                    var m = java.util.regex.Pattern.compile("filename=\"([^\"]+)\"").matcher(header);
+                    if (m.find()) filename = m.group(1);
+                    int headerEnd = indexOf(body, "\r\n\r\n".getBytes(), bodyStr.indexOf(header.substring(0, 30)));
+                    int partEnd = indexOf(body, boundary.getBytes(), headerEnd + 4);
+                    if (headerEnd >= 0 && partEnd >= 0) {
+                        int dataStart = headerEnd + 4;
+                        int dataEnd = partEnd - 2;
+                        fileBytes = java.util.Arrays.copyOfRange(body, dataStart, dataEnd);
+                    }
+                }
+            }
+        }
+
+        if (filename == null || fileBytes == null) {
+            sendJson(ex, 400, Map.of("error", "no file"));
+            return;
+        }
+
+        Path destDir = AUDIOS_DIR.resolve(category);
+        Files.createDirectories(destDir);
+        Files.write(destDir.resolve(filename), fileBytes);
+        sendJson(ex, 200, Map.of("ok", true, "path", category + "/" + filename));
+    }
+
+    private static int indexOf(byte[] haystack, byte[] needle, int from) {
+        outer:
+        for (int i = Math.max(0, from); i <= haystack.length - needle.length; i++) {
+            for (int j = 0; j < needle.length; j++) {
+                if (haystack[i + j] != needle[j]) continue outer;
+            }
+            return i;
+        }
+        return -1;
     }
 
     private static void handleAnnotations(HttpExchange ex, String filepath) throws IOException {

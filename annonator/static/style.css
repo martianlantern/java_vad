@@ -355,3 +355,23 @@ button.danger:hover { background: rgba(213,26,36,0.1); }
   font-size: 0.75rem;
   color: var(--text-muted);
 }
+
+.upload-btn {
+  cursor: pointer;
+  border: 1px solid var(--border-color);
+  background: var(--code-bg);
+  color: var(--text-color);
+  padding: 0.4rem 0.8rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  transition: background 0.15s;
+}
+
+.upload-btn:hover { background: #2a2d35; }
+
+.seg-stats {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
