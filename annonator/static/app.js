@@ -12,6 +12,7 @@ let dragState = null;
 let userScrolling = false;
 let userScrollTimer = null;
 let userSeeking = false;
+let pendingSeekTime = null;
 
 const audioEl = document.getElementById("audio-el");
 const audioSelect = document.getElementById("audio-select");
@@ -153,6 +154,7 @@ function renderSegments(track, segments, cls) {
       el.appendChild(rh);
     } else {
       el.addEventListener("click", () => {
+        pendingSeekTime = seg.start;
         audioEl.currentTime = seg.start;
         if (!isPlaying) togglePlay();
       });
@@ -176,9 +178,9 @@ function togglePlay() {
     playBtn.innerHTML = "&#9654;";
     cancelAnimationFrame(animFrame);
   } else {
-    audioEl.play();
     isPlaying = true;
     playBtn.innerHTML = "&#9646;&#9646;";
+    audioEl.play();
     tickPlayhead();
   }
 }
@@ -193,7 +195,9 @@ audioEl.addEventListener("ended", () => {
 
 function tickPlayhead() {
   if (!isPlaying) return;
-  const t = audioEl.currentTime;
+  const raw = audioEl.currentTime;
+  const t = (pendingSeekTime !== null && Math.abs(raw - pendingSeekTime) > 0.5) ? pendingSeekTime : raw;
+  if (pendingSeekTime !== null && Math.abs(raw - pendingSeekTime) <= 0.5) pendingSeekTime = null;
   const tw = parseFloat(gtTrack.style.width) || 600;
   const px = t / duration * tw;
   gtPlayhead.style.left = px + "px";
@@ -228,22 +232,20 @@ function syncPlayheadToSeekBar() {
   timeDisplay.textContent = `${fmt(t)} / ${fmt(duration)}`;
 }
 
+function commitSeek() {
+  const t = (seekBar.value / 1000) * duration;
+  pendingSeekTime = t;
+  audioEl.currentTime = t;
+  syncPlayheadToSeekBar();
+  userSeeking = false;
+}
+
 seekBar.addEventListener("mousedown", () => { userSeeking = true; });
 seekBar.addEventListener("touchstart", () => { userSeeking = true; });
 seekBar.addEventListener("input", syncPlayheadToSeekBar);
-seekBar.addEventListener("change", () => {
-  audioEl.currentTime = (seekBar.value / 1000) * duration;
-  syncPlayheadToSeekBar();
-  userSeeking = false;
-});
-seekBar.addEventListener("mouseup", () => {
-  audioEl.currentTime = (seekBar.value / 1000) * duration;
-  userSeeking = false;
-});
-seekBar.addEventListener("touchend", () => {
-  audioEl.currentTime = (seekBar.value / 1000) * duration;
-  userSeeking = false;
-});
+seekBar.addEventListener("change", commitSeek);
+seekBar.addEventListener("mouseup", commitSeek);
+seekBar.addEventListener("touchend", commitSeek);
 
 [gtScroll, webrtcScroll, sileroScroll].forEach(sc => {
   sc.addEventListener("scroll", () => {
@@ -288,6 +290,7 @@ gtTrack.addEventListener("click", (e) => {
     renderGt();
     computeMetrics();
   } else {
+    pendingSeekTime = t;
     audioEl.currentTime = t;
     if (!isPlaying) togglePlay();
   }
@@ -402,19 +405,22 @@ function computeMetrics() {
     const far = fp + tn > 0 ? fp / (fp + tn) : 0;
     const missRate = tp + fn > 0 ? fn / (tp + fn) : 0;
 
-    return { name, precision, recall, f1, accuracy, far, missRate, tp, fp, fn, tn };
+    const iou = tp + fp + fn > 0 ? tp / (tp + fp + fn) : 0;
+
+    return { name, precision, recall, f1, accuracy, far, missRate, iou, tp, fp, fn, tn };
   };
 
   const webrtcM = calcMetrics(webrtcBins, "WebRTC");
   const sileroM = calcMetrics(sileroBins, "Silero");
 
   [webrtcM, sileroM].forEach(m => {
-    const card = (title, value, detail) => {
+    const card = (title, value, detail, cls) => {
       const el = document.createElement("div");
-      el.className = "metric-card";
+      el.className = "metric-card" + (cls ? ` ${cls}` : "");
       el.innerHTML = `<div class="metric-title">${m.name} — ${title}</div><div class="metric-value">${value}</div>${detail ? `<div class="metric-detail">${detail}</div>` : ""}`;
       metricsGrid.appendChild(el);
     };
+    card("IoU (Jaccard)", (m.iou * 100).toFixed(1) + "%", `Intersection over Union — TP/(TP+FP+FN)`, "metric-highlight");
     card("F1 Score", (m.f1 * 100).toFixed(1) + "%", "Harmonic mean of precision & recall");
     card("Accuracy", (m.accuracy * 100).toFixed(1) + "%", `TP=${m.tp} TN=${m.tn} FP=${m.fp} FN=${m.fn}`);
     card("Precision", (m.precision * 100).toFixed(1) + "%", "Of predicted speech, how much is correct");

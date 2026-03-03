@@ -375,3 +375,8 @@ button.danger:hover { background: rgba(213,26,36,0.1); }
   margin-top: 2px;
   font-variant-numeric: tabular-nums;
 }
+
+.metric-card.metric-highlight {
+  border-color: var(--link-color);
+  background: rgba(138, 92, 245, 0.08);
+}
