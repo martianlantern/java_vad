@@ -18,6 +18,7 @@ import java.util.stream.Stream;
 public class Server {
 
     private static final Gson GSON = new GsonBuilder().create();
+    private static final Object ANNOTATIONS_LOCK = new Object();
     private static Path BASE_DIR;
     private static Path AUDIOS_DIR;
     private static Path ANNOTATIONS_FILE;
@@ -53,7 +54,7 @@ public class Server {
         System.out.printf("WebRTC VAD:  %s%n", WebrtcVad.isAvailable() ? "available" : "unavailable");
 
         HttpServer server = HttpServer.create(new InetSocketAddress("0.0.0.0", port), 0);
-        server.setExecutor(Executors.newFixedThreadPool(4));
+        server.setExecutor(Executors.newFixedThreadPool(16));
 
         String pfx = BASE_PATH.isEmpty() ? "/" : BASE_PATH + "/";
         server.createContext(pfx, Server::handleRequest);
@@ -206,10 +207,7 @@ public class Server {
         int webrtcPadMs = Integer.parseInt(params.getOrDefault("webrtc_pad_ms", "300"));
 
         float[] audio16k = loadAudioAsFloat(file, 16000);
-        List<SileroVad.Segment> sileroSegs;
-        synchronized (sileroVad) {
-            sileroSegs = sileroVad.getSpeechTimestamps(audio16k, sileroThr, minSpeechMs, minSilenceMs, speechPadMs);
-        }
+        List<SileroVad.Segment> sileroSegs = sileroVad.getSpeechTimestamps(audio16k, sileroThr, minSpeechMs, minSilenceMs, speechPadMs);
 
         List<Map<String, Double>> sileroList = sileroSegs.stream()
                 .map(s -> Map.of("start", s.start(), "end", s.end()))
@@ -290,14 +288,18 @@ public class Server {
 
     private static void handleAnnotations(HttpExchange ex, String filepath) throws IOException {
         if (ex.getRequestMethod().equalsIgnoreCase("GET")) {
-            Map<String, Object> data = loadAnnotations();
-            Object segs = data.getOrDefault(filepath, List.of());
-            sendJson(ex, 200, segs);
+            synchronized (ANNOTATIONS_LOCK) {
+                Map<String, Object> data = loadAnnotations();
+                Object segs = data.getOrDefault(filepath, List.of());
+                sendJson(ex, 200, segs);
+            }
         } else if (ex.getRequestMethod().equalsIgnoreCase("POST")) {
             String body = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
-            Map<String, Object> data = loadAnnotations();
-            data.put(filepath, GSON.fromJson(body, List.class));
-            Files.writeString(ANNOTATIONS_FILE, GSON.toJson(data));
+            synchronized (ANNOTATIONS_LOCK) {
+                Map<String, Object> data = loadAnnotations();
+                data.put(filepath, GSON.fromJson(body, List.class));
+                Files.writeString(ANNOTATIONS_FILE, GSON.toJson(data));
+            }
             sendJson(ex, 200, Map.of("ok", true));
         }
     }

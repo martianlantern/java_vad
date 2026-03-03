@@ -11,8 +11,7 @@ let addingSegment = false;
 let dragState = null;
 let userScrolling = false;
 let userScrollTimer = null;
-let userSeeking = false;
-let pendingSeekTime = null;
+let seekTarget = null;
 
 const audioEl = document.getElementById("audio-el");
 const audioSelect = document.getElementById("audio-select");
@@ -154,7 +153,7 @@ function renderSegments(track, segments, cls) {
       el.appendChild(rh);
     } else {
       el.addEventListener("click", () => {
-        pendingSeekTime = seg.start;
+        seekTarget = seg.start;
         audioEl.currentTime = seg.start;
         if (!isPlaying) togglePlay();
       });
@@ -178,9 +177,9 @@ function togglePlay() {
     playBtn.innerHTML = "&#9654;";
     cancelAnimationFrame(animFrame);
   } else {
+    audioEl.play();
     isPlaying = true;
     playBtn.innerHTML = "&#9646;&#9646;";
-    audioEl.play();
     tickPlayhead();
   }
 }
@@ -196,56 +195,38 @@ audioEl.addEventListener("ended", () => {
 function tickPlayhead() {
   if (!isPlaying) return;
   const raw = audioEl.currentTime;
-  const t = (pendingSeekTime !== null && Math.abs(raw - pendingSeekTime) > 0.5) ? pendingSeekTime : raw;
-  if (pendingSeekTime !== null && Math.abs(raw - pendingSeekTime) <= 0.5) pendingSeekTime = null;
+  const t = (seekTarget !== null && Math.abs(raw - seekTarget) > 0.5) ? seekTarget : raw;
+  if (seekTarget !== null && Math.abs(raw - seekTarget) <= 0.5) seekTarget = null;
   const tw = parseFloat(gtTrack.style.width) || 600;
   const px = t / duration * tw;
   gtPlayhead.style.left = px + "px";
   webrtcPlayhead.style.left = px + "px";
   sileroPlayhead.style.left = px + "px";
 
-  if (!userSeeking) {
-    seekBar.value = (t / duration * 1000) | 0;
-  }
+  seekBar.value = (t / duration * 1000) | 0;
   timeDisplay.textContent = `${fmt(t)} / ${fmt(duration)}`;
 
   if (!userScrolling) {
-    const scrollContainers = [gtScroll, webrtcScroll, sileroScroll];
-    scrollContainers.forEach(sc => {
+    [gtScroll, webrtcScroll, sileroScroll].forEach(sc => {
       const vis = sc.clientWidth;
-      if (px > sc.scrollLeft + vis * 0.95) {
-        sc.scrollLeft = px - vis * 0.1;
-      }
+      if (px > sc.scrollLeft + vis * 0.95) sc.scrollLeft = px - vis * 0.1;
     });
   }
 
   animFrame = requestAnimationFrame(tickPlayhead);
 }
 
-function syncPlayheadToSeekBar() {
+seekBar.addEventListener("input", () => {
   const t = (seekBar.value / 1000) * duration;
+  seekTarget = t;
+  audioEl.currentTime = t;
   const tw = parseFloat(gtTrack.style.width) || 600;
   const px = t / duration * tw;
   gtPlayhead.style.left = px + "px";
   webrtcPlayhead.style.left = px + "px";
   sileroPlayhead.style.left = px + "px";
   timeDisplay.textContent = `${fmt(t)} / ${fmt(duration)}`;
-}
-
-function commitSeek() {
-  const t = (seekBar.value / 1000) * duration;
-  pendingSeekTime = t;
-  audioEl.currentTime = t;
-  syncPlayheadToSeekBar();
-  userSeeking = false;
-}
-
-seekBar.addEventListener("mousedown", () => { userSeeking = true; });
-seekBar.addEventListener("touchstart", () => { userSeeking = true; });
-seekBar.addEventListener("input", syncPlayheadToSeekBar);
-seekBar.addEventListener("change", commitSeek);
-seekBar.addEventListener("mouseup", commitSeek);
-seekBar.addEventListener("touchend", commitSeek);
+});
 
 [gtScroll, webrtcScroll, sileroScroll].forEach(sc => {
   sc.addEventListener("scroll", () => {
@@ -254,19 +235,16 @@ seekBar.addEventListener("touchend", commitSeek);
       if (other !== sc) other.scrollLeft = sl;
     });
   });
-  sc.addEventListener("mousedown", () => { userScrolling = true; });
   sc.addEventListener("wheel", () => {
     userScrolling = true;
     clearTimeout(userScrollTimer);
     userScrollTimer = setTimeout(() => { userScrolling = false; }, 2000);
   });
-});
-
-document.addEventListener("mouseup", () => {
-  if (userScrolling) {
+  sc.addEventListener("mousedown", () => {
+    userScrolling = true;
     clearTimeout(userScrollTimer);
     userScrollTimer = setTimeout(() => { userScrolling = false; }, 2000);
-  }
+  });
 });
 
 function clickTimeOnTrack(e, track) {
@@ -290,7 +268,7 @@ gtTrack.addEventListener("click", (e) => {
     renderGt();
     computeMetrics();
   } else {
-    pendingSeekTime = t;
+    seekTarget = t;
     audioEl.currentTime = t;
     if (!isPlaying) togglePlay();
   }
@@ -406,7 +384,6 @@ function computeMetrics() {
     const missRate = tp + fn > 0 ? fn / (tp + fn) : 0;
 
     const iou = tp + fp + fn > 0 ? tp / (tp + fp + fn) : 0;
-
     return { name, precision, recall, f1, accuracy, far, missRate, iou, tp, fp, fn, tn };
   };
 
@@ -420,7 +397,7 @@ function computeMetrics() {
       el.innerHTML = `<div class="metric-title">${m.name} — ${title}</div><div class="metric-value">${value}</div>${detail ? `<div class="metric-detail">${detail}</div>` : ""}`;
       metricsGrid.appendChild(el);
     };
-    card("IoU (Jaccard)", (m.iou * 100).toFixed(1) + "%", `Intersection over Union — TP/(TP+FP+FN)`, "metric-highlight");
+    card("IoU (Jaccard)", (m.iou * 100).toFixed(1) + "%", "Intersection over Union — TP/(TP+FP+FN)", "metric-highlight");
     card("F1 Score", (m.f1 * 100).toFixed(1) + "%", "Harmonic mean of precision & recall");
     card("Accuracy", (m.accuracy * 100).toFixed(1) + "%", `TP=${m.tp} TN=${m.tn} FP=${m.fp} FN=${m.fn}`);
     card("Precision", (m.precision * 100).toFixed(1) + "%", "Of predicted speech, how much is correct");

@@ -6,8 +6,6 @@ import java.util.*;
 public class SileroVad implements AutoCloseable {
 
     private final OrtSession session;
-    private float[][][] state;
-    private float[] context;
     private static final int WINDOW = 512;
     private static final int CTX = 64;
     private static final int SR = 16000;
@@ -19,15 +17,10 @@ public class SileroVad implements AutoCloseable {
         opts.setIntraOpNumThreads(1);
         opts.addCPU(true);
         session = env.createSession(modelPath, opts);
-        reset();
     }
 
-    public void reset() {
-        state = new float[2][1][128];
-        context = new float[CTX];
-    }
-
-    public float infer(float[] samples) throws OrtException {
+    private static float infer(OrtSession session, float[] samples,
+                               float[][][] state, float[] context) throws OrtException {
         float[] x = new float[CTX + WINDOW];
         System.arraycopy(context, 0, x, 0, CTX);
         System.arraycopy(samples, 0, x, CTX, Math.min(samples.length, WINDOW));
@@ -39,7 +32,9 @@ public class SileroVad implements AutoCloseable {
             Map<String, OnnxTensor> inputs = Map.of("input", in, "state", st, "sr", sr);
             try (OrtSession.Result r = session.run(inputs)) {
                 float[][] out = (float[][]) r.get(0).getValue();
-                state = (float[][][]) r.get(1).getValue();
+                float[][][] newState = (float[][][]) r.get(1).getValue();
+                System.arraycopy(newState[0][0], 0, state[0][0], 0, 128);
+                System.arraycopy(newState[1][0], 0, state[1][0], 0, 128);
                 System.arraycopy(x, x.length - CTX, context, 0, CTX);
                 return out[0][0];
             }
@@ -50,7 +45,9 @@ public class SileroVad implements AutoCloseable {
 
     public List<Segment> getSpeechTimestamps(float[] audio, float threshold,
                                               int minSpeechMs, int minSilenceMs, int speechPadMs) throws OrtException {
-        reset();
+        float[][][] localState = new float[2][1][128];
+        float[] localContext = new float[CTX];
+
         float negThreshold = threshold - 0.15f;
         int minSpeechSamples = SR * minSpeechMs / 1000;
         int minSilenceSamples = SR * minSilenceMs / 1000;
@@ -60,7 +57,7 @@ public class SileroVad implements AutoCloseable {
         for (int i = 0; i + WINDOW <= audio.length; i += WINDOW) {
             float[] chunk = new float[WINDOW];
             System.arraycopy(audio, i, chunk, 0, WINDOW);
-            probs.add(infer(chunk));
+            probs.add(infer(session, chunk, localState, localContext));
         }
 
         boolean triggered = false;
