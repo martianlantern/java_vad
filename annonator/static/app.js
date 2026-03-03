@@ -9,6 +9,9 @@ let isPlaying = false;
 let animFrame = null;
 let addingSegment = false;
 let dragState = null;
+let userScrolling = false;
+let userScrollTimer = null;
+let userSeeking = false;
 
 const audioEl = document.getElementById("audio-el");
 const audioSelect = document.getElementById("audio-select");
@@ -197,29 +200,49 @@ function tickPlayhead() {
   webrtcPlayhead.style.left = px + "px";
   sileroPlayhead.style.left = px + "px";
 
-  seekBar.value = (t / duration * 1000) | 0;
+  if (!userSeeking) {
+    seekBar.value = (t / duration * 1000) | 0;
+  }
   timeDisplay.textContent = `${fmt(t)} / ${fmt(duration)}`;
 
-  const scrollContainers = [gtScroll, webrtcScroll, sileroScroll];
-  scrollContainers.forEach(sc => {
-    const vis = sc.clientWidth;
-    if (px < sc.scrollLeft || px > sc.scrollLeft + vis) {
-      sc.scrollLeft = px - vis * 0.1;
-    }
-  });
+  if (!userScrolling) {
+    const scrollContainers = [gtScroll, webrtcScroll, sileroScroll];
+    scrollContainers.forEach(sc => {
+      const vis = sc.clientWidth;
+      if (px > sc.scrollLeft + vis * 0.95) {
+        sc.scrollLeft = px - vis * 0.1;
+      }
+    });
+  }
 
   animFrame = requestAnimationFrame(tickPlayhead);
 }
 
-seekBar.addEventListener("input", () => {
-  audioEl.currentTime = (seekBar.value / 1000) * duration;
-  const t = audioEl.currentTime;
+function syncPlayheadToSeekBar() {
+  const t = (seekBar.value / 1000) * duration;
   const tw = parseFloat(gtTrack.style.width) || 600;
   const px = t / duration * tw;
   gtPlayhead.style.left = px + "px";
   webrtcPlayhead.style.left = px + "px";
   sileroPlayhead.style.left = px + "px";
   timeDisplay.textContent = `${fmt(t)} / ${fmt(duration)}`;
+}
+
+seekBar.addEventListener("mousedown", () => { userSeeking = true; });
+seekBar.addEventListener("touchstart", () => { userSeeking = true; });
+seekBar.addEventListener("input", syncPlayheadToSeekBar);
+seekBar.addEventListener("change", () => {
+  audioEl.currentTime = (seekBar.value / 1000) * duration;
+  syncPlayheadToSeekBar();
+  userSeeking = false;
+});
+seekBar.addEventListener("mouseup", () => {
+  audioEl.currentTime = (seekBar.value / 1000) * duration;
+  userSeeking = false;
+});
+seekBar.addEventListener("touchend", () => {
+  audioEl.currentTime = (seekBar.value / 1000) * duration;
+  userSeeking = false;
 });
 
 [gtScroll, webrtcScroll, sileroScroll].forEach(sc => {
@@ -229,6 +252,19 @@ seekBar.addEventListener("input", () => {
       if (other !== sc) other.scrollLeft = sl;
     });
   });
+  sc.addEventListener("mousedown", () => { userScrolling = true; });
+  sc.addEventListener("wheel", () => {
+    userScrolling = true;
+    clearTimeout(userScrollTimer);
+    userScrollTimer = setTimeout(() => { userScrolling = false; }, 2000);
+  });
+});
+
+document.addEventListener("mouseup", () => {
+  if (userScrolling) {
+    clearTimeout(userScrollTimer);
+    userScrollTimer = setTimeout(() => { userScrolling = false; }, 2000);
+  }
 });
 
 function clickTimeOnTrack(e, track) {
