@@ -13,12 +13,14 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
 public class Server {
 
     private static final Gson GSON = new GsonBuilder().create();
     private static final Object ANNOTATIONS_LOCK = new Object();
+    private static final AtomicInteger ACTIVE_CONNECTIONS = new AtomicInteger(0);
     private static Path BASE_DIR;
     private static Path AUDIOS_DIR;
     private static Path ANNOTATIONS_FILE;
@@ -83,9 +85,11 @@ public class Server {
         String rel = BASE_PATH.isEmpty() ? path : path.substring(BASE_PATH.length());
         if (rel.isEmpty()) rel = "/";
 
+        ACTIVE_CONNECTIONS.incrementAndGet();
         try {
             if (rel.equals("/")) serveIndex(ex);
             else if (rel.startsWith("/static/")) serveStatic(ex, rel.substring(8));
+            else if (rel.equals("/api/connections")) sendJson(ex, 200, Map.of("active", ACTIVE_CONNECTIONS.get()));
             else if (rel.startsWith("/api/audios")) listAudios(ex);
             else if (rel.startsWith("/api/audio/")) serveAudio(ex, decode(rel.substring(11)));
             else if (rel.startsWith("/api/duration/")) getDuration(ex, decode(rel.substring(14)));
@@ -96,6 +100,8 @@ public class Server {
         } catch (Exception e) {
             e.printStackTrace();
             sendJson(ex, 500, Map.of("error", e.getMessage()));
+        } finally {
+            ACTIVE_CONNECTIONS.decrementAndGet();
         }
     }
 
@@ -168,10 +174,41 @@ public class Server {
             case "flac" -> "audio/flac";
             default -> "application/octet-stream";
         };
-        byte[] body = Files.readAllBytes(file);
+        long total = Files.size(file);
         ex.getResponseHeaders().set("Content-Type", ct);
-        ex.sendResponseHeaders(200, body.length);
-        ex.getResponseBody().write(body);
+        ex.getResponseHeaders().set("Accept-Ranges", "bytes");
+
+        String rangeHeader = ex.getRequestHeaders().getFirst("Range");
+        if (rangeHeader != null && rangeHeader.startsWith("bytes=")) {
+            String spec = rangeHeader.substring(6);
+            String[] parts = spec.split("-", 2);
+            long start = parts[0].isEmpty() ? total - Long.parseLong(parts[1]) : Long.parseLong(parts[0]);
+            long end = (parts.length > 1 && !parts[1].isEmpty()) ? Long.parseLong(parts[1]) : total - 1;
+            if (start < 0) start = 0;
+            if (end >= total) end = total - 1;
+            long len = end - start + 1;
+
+            ex.getResponseHeaders().set("Content-Range", "bytes " + start + "-" + end + "/" + total);
+            ex.sendResponseHeaders(206, len);
+            try (InputStream is = Files.newInputStream(file)) {
+                is.skip(start);
+                byte[] buf = new byte[8192];
+                long remaining = len;
+                OutputStream os = ex.getResponseBody();
+                while (remaining > 0) {
+                    int toRead = (int) Math.min(buf.length, remaining);
+                    int read = is.read(buf, 0, toRead);
+                    if (read <= 0) break;
+                    os.write(buf, 0, read);
+                    remaining -= read;
+                }
+            }
+        } else {
+            ex.sendResponseHeaders(200, total);
+            try (InputStream is = Files.newInputStream(file)) {
+                is.transferTo(ex.getResponseBody());
+            }
+        }
         ex.close();
     }
 

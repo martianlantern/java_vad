@@ -11,7 +11,6 @@ let addingSegment = false;
 let dragState = null;
 let userScrolling = false;
 let userScrollTimer = null;
-let seekTarget = null;
 
 const audioEl = document.getElementById("audio-el");
 const audioSelect = document.getElementById("audio-select");
@@ -153,8 +152,7 @@ function renderSegments(track, segments, cls) {
       el.appendChild(rh);
     } else {
       el.addEventListener("click", () => {
-        seekTarget = seg.start;
-        audioEl.currentTime = seg.start;
+        seekTo(seg.start);
         if (!isPlaying) togglePlay();
       });
     }
@@ -170,6 +168,21 @@ function renderAll() {
   updateStats();
 }
 
+function seekTo(t) {
+  audioEl.currentTime = t;
+  syncUI(t);
+}
+
+function syncUI(t) {
+  const tw = parseFloat(gtTrack.style.width) || 600;
+  const px = t / duration * tw;
+  gtPlayhead.style.left = px + "px";
+  webrtcPlayhead.style.left = px + "px";
+  sileroPlayhead.style.left = px + "px";
+  seekBar.value = (t / duration * 1000) | 0;
+  timeDisplay.textContent = `${fmt(t)} / ${fmt(duration)}`;
+}
+
 function togglePlay() {
   if (isPlaying) {
     audioEl.pause();
@@ -177,9 +190,9 @@ function togglePlay() {
     playBtn.innerHTML = "&#9654;";
     cancelAnimationFrame(animFrame);
   } else {
-    audioEl.play();
     isPlaying = true;
     playBtn.innerHTML = "&#9646;&#9646;";
+    audioEl.play();
     tickPlayhead();
   }
 }
@@ -194,19 +207,12 @@ audioEl.addEventListener("ended", () => {
 
 function tickPlayhead() {
   if (!isPlaying) return;
-  const raw = audioEl.currentTime;
-  const t = (seekTarget !== null && Math.abs(raw - seekTarget) > 0.5) ? seekTarget : raw;
-  if (seekTarget !== null && Math.abs(raw - seekTarget) <= 0.5) seekTarget = null;
-  const tw = parseFloat(gtTrack.style.width) || 600;
-  const px = t / duration * tw;
-  gtPlayhead.style.left = px + "px";
-  webrtcPlayhead.style.left = px + "px";
-  sileroPlayhead.style.left = px + "px";
-
-  seekBar.value = (t / duration * 1000) | 0;
-  timeDisplay.textContent = `${fmt(t)} / ${fmt(duration)}`;
+  const t = audioEl.currentTime;
+  syncUI(t);
 
   if (!userScrolling) {
+    const tw = parseFloat(gtTrack.style.width) || 600;
+    const px = t / duration * tw;
     [gtScroll, webrtcScroll, sileroScroll].forEach(sc => {
       const vis = sc.clientWidth;
       if (px > sc.scrollLeft + vis * 0.95) sc.scrollLeft = px - vis * 0.1;
@@ -217,15 +223,7 @@ function tickPlayhead() {
 }
 
 seekBar.addEventListener("input", () => {
-  const t = (seekBar.value / 1000) * duration;
-  seekTarget = t;
-  audioEl.currentTime = t;
-  const tw = parseFloat(gtTrack.style.width) || 600;
-  const px = t / duration * tw;
-  gtPlayhead.style.left = px + "px";
-  webrtcPlayhead.style.left = px + "px";
-  sileroPlayhead.style.left = px + "px";
-  timeDisplay.textContent = `${fmt(t)} / ${fmt(duration)}`;
+  seekTo((seekBar.value / 1000) * duration);
 });
 
 [gtScroll, webrtcScroll, sileroScroll].forEach(sc => {
@@ -268,8 +266,7 @@ gtTrack.addEventListener("click", (e) => {
     renderGt();
     computeMetrics();
   } else {
-    seekTarget = t;
-    audioEl.currentTime = t;
+    seekTo(t);
     if (!isPlaying) togglePlay();
   }
 });
@@ -445,5 +442,16 @@ uploadInput.addEventListener("change", async () => {
   statusEl.textContent = `Uploaded ${files.length} file(s)`;
   setTimeout(() => statusEl.textContent = "", 3000);
 });
+
+const connBadge = document.getElementById("conn-badge");
+async function pollConnections() {
+  try {
+    const r = await fetch(`${BASE}/api/connections`);
+    const d = await r.json();
+    connBadge.textContent = `${d.active} active conn${d.active !== 1 ? "s" : ""}`;
+  } catch {}
+}
+pollConnections();
+setInterval(pollConnections, 5000);
 
 loadAudioList();
